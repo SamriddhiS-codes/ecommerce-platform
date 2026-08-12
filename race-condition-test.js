@@ -6,5 +6,5 @@ export const options = {
 };
 
 export default function () {
-  http.post('http://localhost:8080/orders/buy/4'); // use your actual new id here
+  http.post('http://localhost:8080/orders/buy/5'); // use your actual new id here
 }
