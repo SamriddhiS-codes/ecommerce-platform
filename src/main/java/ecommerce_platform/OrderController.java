@@ -3,6 +3,7 @@ package ecommerce_platform;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.concurrent.TimeUnit;
 
@@ -20,11 +21,31 @@ public class OrderController {
     private RedisTemplate<String, String> redisTemplate;
 
     private static final long RESERVATION_TTL_SECONDS = 300;
+    private static final int MAX_REQUESTS_PER_WINDOW = 5;
+    private static final int RATE_LIMIT_WINDOW_SECONDS = 10;
+
+    private boolean isRateLimited(String clientId) {
+        String rateLimitKey = "ratelimit:" + clientId;
+
+        Long currentCount = redisTemplate.opsForValue().increment(rateLimitKey);
+
+        if (currentCount != null && currentCount == 1L) {
+            redisTemplate.expire(rateLimitKey, RATE_LIMIT_WINDOW_SECONDS, TimeUnit.SECONDS);
+        }
+
+        return currentCount != null && currentCount > MAX_REQUESTS_PER_WINDOW;
+    }
 
     @PostMapping("/buy/{productId}")
     public String buy(
             @PathVariable Long productId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            HttpServletRequest request) {
+
+        String clientIp = request.getRemoteAddr();
+        if (isRateLimited(clientIp)) {
+            return "TOO MANY REQUESTS - please slow down";
+        }
 
         if (idempotencyKey != null) {
             String idempotencyRedisKey = "idempotency:" + idempotencyKey;
