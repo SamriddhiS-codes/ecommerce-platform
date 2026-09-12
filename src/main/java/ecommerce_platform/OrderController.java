@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 public class OrderController {
 
     @Autowired
-    private ProductRepository productRepository;
+    private OrderService orderService;
 
     @Autowired
     private OrderRepository orderRepository;
@@ -47,32 +47,22 @@ public class OrderController {
         String result;
 
         try {
-            Product product = productRepository.findById(productId)
-                    .orElseThrow(() -> new RuntimeException("Product not found"));
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
 
-            if (product.getStockQuantity() <= 0) {
-                result = "OUT OF STOCK";
-            } else {
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
+            try {
+                Order order = orderService.reserveStock(productId);
 
-                product.setStockQuantity(product.getStockQuantity() - 1);
-                productRepository.save(product);
-
-                Order order = new Order();
-                order.setProductId(productId);
-                order.setQuantity(1);
-                order.setStatus("RESERVED");
-                order = orderRepository.save(order);
-                Long orderId = order.getId();
-
-                String reservationKey = "reservation:order:" + orderId;
+                String reservationKey = "reservation:order:" + order.getId();
                 redisTemplate.opsForValue().set(reservationKey, String.valueOf(productId), RESERVATION_TTL_SECONDS, TimeUnit.SECONDS);
 
-                result = "ORDER RESERVED - order id " + orderId + " - complete payment within " + RESERVATION_TTL_SECONDS + " seconds";
+                result = "ORDER RESERVED - order id " + order.getId() + " - complete payment within " + RESERVATION_TTL_SECONDS + " seconds";
+
+            } catch (IllegalStateException e) {
+                result = "OUT OF STOCK";
             }
 
         } finally {
@@ -136,17 +126,8 @@ public class OrderController {
         }
 
         try {
-            Product product = productRepository.findById(productId)
-                    .orElseThrow(() -> new RuntimeException("Product not found"));
-
-            product.setStockQuantity(product.getStockQuantity() + 1);
-            productRepository.save(product);
-
-            order.setStatus("PAYMENT_FAILED");
-            orderRepository.save(order);
-
+            orderService.rollbackStock(productId, order);
             redisTemplate.delete(reservationKey);
-
             return "PAYMENT FAILED - stock rolled back for order " + orderId;
 
         } finally {
